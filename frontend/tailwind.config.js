@@ -18,8 +18,11 @@ export default {
         },
       },
       fontFamily: {
-        display: ["Poppins", "sans-serif"],
+        display: ["Sora", "sans-serif"],
         body: ["Manrope", "sans-serif"],
+      },
+      boxShadow: {
+        glow: "0 24px 80px rgba(14, 165, 233, 0.14)",
       },
     },
   },

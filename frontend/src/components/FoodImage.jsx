@@ -1,71 +1,59 @@
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { foodFallbackIcon } from "../utils/helpers";
 import { recipeService } from "../services/recipeService";
 
-export default function FoodImage({ query, seed = "", alt, className = "", loading = "lazy" }) {
+function FoodImageComponent({ query, seed = "", alt, className = "", loading = "lazy", sizes = "100vw" }) {
   const [imageUrl, setImageUrl] = useState(null);
   const [loadingState, setLoadingState] = useState(true);
-  const [error, setError] = useState(false);
 
   useEffect(() => {
     let mounted = true;
     setLoadingState(true);
-    setError(false);
-    
+
     async function fetchImage() {
       if (!query) {
-        setImageUrl(foodFallbackIcon(800, 600));
-        setLoadingState(false);
-        return;
-      }
-      
-      try {
-        // Use the new recipe image API with caching
-        const result = await recipeService.getRecipeImage(query);
-        
-        if (mounted && result.image) {
-          setImageUrl(result.image);
-        } else if (mounted) {
-          // No image found, use fallback
-          setError(true);
-          setImageUrl(foodFallbackIcon(800, 600));
-        }
-      } catch (err) {
         if (mounted) {
-          setError(true);
           setImageUrl(foodFallbackIcon(800, 600));
-        }
-      } finally {
-        if (mounted) {
           setLoadingState(false);
         }
+        return;
+      }
+
+      try {
+        const result = await recipeService.getRecipeImage(query);
+        if (mounted) setImageUrl(result.image || foodFallbackIcon(800, 600));
+      } catch {
+        if (mounted) setImageUrl(foodFallbackIcon(800, 600));
+      } finally {
+        if (mounted) setLoadingState(false);
       }
     }
-    
+
     fetchImage();
-    
     return () => {
       mounted = false;
     };
   }, [query, seed]);
 
-  // Reset when query changes
-  useEffect(() => {
-    setError(false);
-  }, [query]);
-
   return (
-    <img
-      src={imageUrl || foodFallbackIcon(800, 600)}
-      alt={alt || query || "food image"}
-      className={className}
-      loading={loading}
-      onError={(e) => {
-        if (!error) {
-          setError(true);
+    <div className={`relative overflow-hidden bg-slate-900 ${className}`}>
+      {loadingState ? <div className="absolute inset-0 animate-pulse bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900" /> : null}
+      <img
+        src={imageUrl || foodFallbackIcon(800, 600)}
+        alt={alt || query || "food image"}
+        className="h-full w-full object-cover"
+        loading={loading}
+        sizes={sizes}
+        decoding="async"
+        onError={(e) => {
+          e.currentTarget.onerror = null;
           e.currentTarget.src = foodFallbackIcon(800, 600);
-        }
-      }}
-    />
+        }}
+      />
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-slate-950/40 via-transparent to-transparent" />
+    </div>
   );
 }
+
+const FoodImage = memo(FoodImageComponent);
+export default FoodImage;

@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { recipeService } from "../services/recipeService";
+import { getRecipeRouteId, saveActiveRecipe } from "../utils/recipeSession";
 
 export default function Recipes({ user }) {
   const [saved, setSaved] = useState([]);
@@ -24,27 +26,52 @@ export default function Recipes({ user }) {
   }, [user]);
 
   return (
-    <main className="mx-auto max-w-6xl px-4 py-8">
-      <h1 className="font-display text-3xl text-slate-100">Recipes</h1>
-      {!user ? <p className="mt-2 text-sm text-slate-400">Not logged in: showing local saved/history fallback.</p> : null}
-      <div className="mt-4 grid gap-4 md:grid-cols-2">
-        <section className="rounded-2xl border border-slate-700 bg-slate-800/80 p-4">
-          <h2 className="font-display text-xl text-slate-100">Saved Recipes</h2>
-          <ul className="mt-3 space-y-2 text-sm text-slate-300">
-            {saved.map((r) => (
-              <li key={r.id} className="rounded-lg bg-slate-900 p-2">{r.name}</li>
-            ))}
-          </ul>
-        </section>
-        <section className="rounded-2xl border border-slate-700 bg-slate-800/80 p-4">
-          <h2 className="font-display text-xl text-slate-100">Cooking History</h2>
-          <ul className="mt-3 space-y-2 text-sm text-slate-300">
-            {history.map((h) => (
-              <li key={h.id} className="rounded-lg bg-slate-900 p-2">{h.recipeName}</li>
-            ))}
-          </ul>
-        </section>
+    <main className="mx-auto max-w-6xl px-4 py-10">
+      <section className="glass-panel hero-glow rounded-[2rem] p-8">
+        <p className="text-xs uppercase tracking-[0.32em] text-sky-300">Recipe Library</p>
+        <h1 className="mt-3 font-display text-4xl text-slate-100">Your saved dishes and cooking history</h1>
+        <p className="mt-3 max-w-3xl text-slate-300">
+          {user
+            ? "Your authenticated recipe activity is synced here when cloud storage is available."
+            : "Firebase is not active, so SmartChefAI is showing the local fallback library stored in this browser."}
+        </p>
+      </section>
+
+      <div className="mt-8 grid gap-6 md:grid-cols-2">
+        <LibrarySection title="Saved Recipes" items={saved} empty="No saved recipes yet." type="saved" />
+        <LibrarySection title="Cooking History" items={history} empty="No cooking history yet." type="history" />
       </div>
     </main>
+  );
+}
+
+function LibrarySection({ title, items, empty, type }) {
+  return (
+    <section className="glass-panel rounded-[2rem] p-5">
+      <h2 className="font-display text-2xl text-slate-100">{title}</h2>
+      <div className="mt-4 space-y-3">
+        {items.length ? items.map((item, index) => {
+          const recipeName = type === "saved" ? item.name : item.recipeName;
+          const routeId = getRecipeRouteId(item);
+          return (
+            <div key={item.id || `${recipeName}-${index}`} className="flex items-center justify-between gap-4 rounded-[1.4rem] border border-slate-800 bg-slate-950/70 px-4 py-4">
+              <div>
+                <p className="font-medium text-slate-100">{recipeName}</p>
+                <p className="mt-1 text-xs uppercase tracking-[0.2em] text-slate-500">{type === "saved" ? "Saved recipe" : item.action || "Viewed"}</p>
+              </div>
+              {type === "saved" ? (
+                <Link
+                  to={`/recipe/${routeId}`}
+                  onClick={() => saveActiveRecipe(item)}
+                  className="rounded-full border border-slate-700 px-4 py-2 text-sm text-sky-300 transition hover:border-sky-400 hover:text-sky-200"
+                >
+                  Open
+                </Link>
+              ) : null}
+            </div>
+          );
+        }) : <p className="rounded-[1.4rem] border border-dashed border-slate-800 bg-slate-950/60 px-4 py-5 text-sm text-slate-500">{empty}</p>}
+      </div>
+    </section>
   );
 }

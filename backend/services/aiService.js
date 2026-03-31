@@ -8,6 +8,19 @@ const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
 const MIN_STEPS = 8;
 const MAX_STEPS = 12;
 const BASIC_PANTRY = ["oil", "salt", "water", "ghee"];
+const SUBSTITUTION_MAP = {
+  garlic: ["ginger", "shallot", "garlic powder"],
+  onion: ["shallot", "leek", "spring onion whites"],
+  tomato: ["tomato puree", "curd", "a splash of lemon with onion"],
+  curd: ["plain yogurt", "coconut yogurt", "cream"],
+  yogurt: ["curd", "plain yogurt", "cream"],
+  cream: ["cashew paste", "milk", "hung curd"],
+  butter: ["ghee", "oil"],
+  oil: ["ghee", "butter"],
+  chicken: ["paneer", "mushroom", "tofu"],
+  paneer: ["tofu", "mushroom", "boiled potato"],
+  egg: ["paneer", "tofu", "boiled potato"],
+};
 
 function parseJson(content, fallback) {
   try {
@@ -37,6 +50,9 @@ Hard Rules:
 * Recipe must be realistic for the selected cuisine and regional style.
 * Use only user ingredients plus pantry basics (oil, salt, water, ghee).
 * Never invent unavailable major ingredients.
+* Include substitution suggestions whenever an ingredient is commonly unavailable.
+* Respect the user's requested max time, preferred difficulty, spice level, diet preference, skill level, and available tools.
+* Never give unsafe cooking advice. Do not suggest tasting raw meat, touching hot oil, leaving heat unattended, or using damaged equipment.
 * No impossible actions:
   - never chop rice/curd/yogurt/oil/water/milk/ghee/spice powders
   - liquids are measured/poured/heated, not chopped/sliced
@@ -91,8 +107,14 @@ function buildUserPrompt(input) {
       selectedRegionalStyle: input?.regionalStyle || null,
       selectedLanguage: input?.language || "English",
       instructionStyle: input?.instructionStyle || "Simple",
+      difficultyPreference: input?.difficultyPreference || "Balanced",
+      spiceLevel: input?.spiceLevel || "Medium",
+      dietPreference: input?.dietPreference || "Flexible",
+      skillLevel: input?.skillLevel || "Home Cook",
+      availableTools: input?.availableTools || [],
       maxTimeMinutes: Number(input?.maxTime) || 30,
       objective: input?.objective || "Generate a realistic recipe",
+      substitutionTargets: input?.missingIngredients || [],
       allowedIngredients: ingredients,
       allowedPantryBasics: BASIC_PANTRY,
       outputRules: {
@@ -193,10 +215,7 @@ export async function generateRecipes(input) {
       temperature: 0.4,
       messages: [
         { role: "system", content: recipeSystemPrompt() },
-        {
-          role: "user",
-          content: buildUserPrompt(input),
-        },
+        { role: "user", content: buildUserPrompt(input) },
       ],
       response_format: { type: "json_object" },
     });
@@ -206,21 +225,177 @@ export async function generateRecipes(input) {
     const normalized = normalizeRecipes(parsed);
     last = normalized;
 
-    if (normalized.recipes.length) {
-      return normalized;
-    }
+    if (normalized.recipes.length) return normalized;
   }
 
   return last;
 }
 
-export async function answerRecipeQuestion({ question, recipe }) {
-  if (!openai) {
+function stepTextForMatching(step = {}) {
+  return `${step.ingredients || ""} ${step.ingredient || ""} ${step.instruction || ""} ${step.text || ""}`.toLowerCase();
+}
+
+function findQuantityForQuestion(question = "", recipe = {}, currentStep = null) {
+  const lower = String(question || "").toLowerCase();
+  const normalizedIngredients = (recipe?.ingredients || []).map((item) => {
+    if (typeof item === "string") return { name: item, quantity: "as needed" };
+    return { name: String(item?.name || "").trim(), quantity: String(item?.quantity || "").trim() };
+  }).filter((item) => item.name);
+
+  const directMatch = normalizedIngredients.find((item) => lower.includes(item.name.toLowerCase()));
+  if (directMatch?.quantity) return directMatch;
+
+  if (/(oil|ghee|butter)/.test(lower)) {
+    const fatMatch = normalizedIngredients.find((item) => /(oil|ghee|butter)/i.test(item.name));
+    if (fatMatch?.quantity) return fatMatch;
+  }
+
+  const step = currentStep || recipe?.currentStep || {};
+  const stepText = stepTextForMatching(step);
+  const stepIngredientMatch = normalizedIngredients.find((item) => stepText.includes(item.name.toLowerCase()) && item.quantity);
+  if (stepIngredientMatch?.quantity) return stepIngredientMatch;
+
+  const extractedStepMatch = extractStepQuantityMatch(question, step);
+  if (extractedStepMatch?.quantity) return extractedStepMatch;
+
+  return null;
+}
+
+function extractStepQuantityMatch(question = "", currentStep = null) {
+  const lower = String(question || "").toLowerCase();
+  const stepText = stepTextForMatching(currentStep || {});
+  const targetNames = /(oil|ghee|butter)/.test(lower) ? ["oil", "ghee", "butter"] : [];
+
+  for (const name of targetNames) {
+    const patterns = [
+      new RegExp(`(\\d+(?:[./]\\d+)?\\s*(?:tbsp|tablespoon|tablespoons|tsp|teaspoon|teaspoons|cup|cups|ml|l|litre|liter|pinch)?)\\s+${name}\\b`, "i"),
+      new RegExp(`${name}\\b[^.\\n,;:]{0,24}?(\\d+(?:[./]\\d+)?\\s*(?:tbsp|tablespoon|tablespoons|tsp|teaspoon|teaspoons|cup|cups|ml|l|litre|liter|pinch)?)`, "i"),
+    ];
+    for (const pattern of patterns) {
+      const match = stepText.match(pattern);
+      if (match?.[1]) {
+        return { name, quantity: match[1].trim() };
+      }
+    }
+  }
+
+  return null;
+}
+
+function isPrepOnlyStep(step = {}) {
+  const text = `${step.title || ""} ${step.instruction || ""} ${step.text || ""}`.toLowerCase();
+  return /(measure|organize|prep|prepare|portion|ready near|within reach|set aside)/.test(text);
+}
+
+function findUpcomingStepQuantity(question = "", recipe = {}, currentStepIndex = 0) {
+  const steps = Array.isArray(recipe?.steps) ? recipe.steps : [];
+  for (let idx = currentStepIndex + 1; idx < steps.length; idx += 1) {
+    const step = steps[idx] || {};
+    const match = findQuantityForQuestion(question, recipe, step);
+    if (match?.quantity) {
+      return {
+        ...match,
+        stepNumber: Number(step.stepNumber) || idx + 1,
+        stepTitle: step.title || `Step ${idx + 1}`,
+      };
+    }
+    if (!isPrepOnlyStep(step)) break;
+  }
+  return null;
+}
+
+function resolveRecipeReference(question = "", recipe = {}, previousMessages = []) {
+  const lower = String(question || "").toLowerCase();
+  if (!/\bit\b|that|this|them/.test(lower)) return null;
+
+  const currentStep = recipe?.currentStep || recipe?.steps?.[recipe?.currentStepIndex || 0] || recipe?.steps?.[0] || null;
+  const stepIngredients = String(currentStep?.ingredients || currentStep?.ingredient || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (stepIngredients.length) return stepIngredients[0];
+
+  const historyText = previousMessages.map((item) => item.text || "").join(" ").toLowerCase();
+  const ingredientNames = (recipe?.ingredients || []).map((item) => String(item?.name || item || "")).filter(Boolean);
+  return ingredientNames.find((name) => historyText.includes(name.toLowerCase())) || ingredientNames[0] || null;
+}
+
+function answerRecipeQuestionFallback({ question, recipe, previousMessages = [] }) {
+  const lower = String(question || "").toLowerCase();
+  const currentStep = recipe?.currentStep || recipe?.steps?.[recipe?.currentStepIndex || 0] || recipe?.steps?.[0] || null;
+  const ingredientNames = (recipe?.ingredients || []).map((item) => String(item?.name || item || "").toLowerCase());
+  const resolvedReference = resolveRecipeReference(question, recipe, previousMessages);
+  const targetIngredient = resolvedReference || ingredientNames[0] || "this ingredient";
+  const quantityMatch = findQuantityForQuestion(question, recipe, currentStep);
+  const upcomingQuantityMatch = findUpcomingStepQuantity(question, recipe, Number(recipe?.currentStepIndex) || 0);
+
+  if (/burn|burning|too hot|smoke/.test(lower)) {
     return {
-      answer: "I can only help with questions related to this recipe.",
+      answer: "Lower the heat right away, move the pan off the burner for 20 to 30 seconds, and stir continuously. If this is a sauce or masala, add a small splash of water to cool it down, then return to low or medium heat.",
     };
   }
 
+  if (/oil hot|hot enough|is the oil ready/.test(lower)) {
+    return {
+      answer: "Look for a light shimmer on the oil and a loose, fluid movement when you tilt the pan. If you drop in a tiny bit of onion or cumin and it sizzles gently right away, the oil is ready.",
+    };
+  }
+
+  if ((/garlic/.test(lower) || resolvedReference === "garlic" || /\bit\b/.test(lower)) && /(replace|substitute|instead|without|dont have|don't have|no )/.test(lower)) {
+    return {
+      answer: `You can replace ${targetIngredient} with a close flavor match and add it gradually. For garlic specifically, use a little extra ginger, shallot, onion, or a pinch of garlic powder if you have it.`,
+    };
+  }
+
+  if (/(replace|substitute|instead|without|dont have|don't have|no )/.test(lower)) {
+    return {
+      answer: `If you do not have ${targetIngredient}, use a similar ingredient with the same cooking role and add it in a smaller amount first. Taste after a minute or two, then adjust seasoning so the recipe stays balanced.`,
+    };
+  }
+
+  if (/salt|salty|too much salt/.test(lower)) {
+    return {
+      answer: "If it tastes too salty, add a little water, tomato, cream, curd, or extra base ingredients like onion to dilute it. Simmer briefly, taste again, and only then adjust the rest of the seasoning.",
+    };
+  }
+
+  if (/stick|sticking|stuck/.test(lower)) {
+    return {
+      answer: "Lower the heat and loosen the pan with a small splash of water or oil, depending on the dish. Stir gently with a flat spoon and make sure the pan is not too dry before continuing.",
+    };
+  }
+
+  if (/raw|cooked|done|ready/.test(lower) && currentStep?.lookFor) {
+    return {
+      answer: `Use this cue for the current step: ${currentStep.lookFor}. If the texture, aroma, and color have not reached that point yet, give it another minute on controlled heat and check again.`,
+    };
+  }
+
+  if (/how much|how many|quantity|amount/.test(lower) && quantityMatch?.quantity) {
+    return {
+      answer: `Use ${quantityMatch.quantity} of ${quantityMatch.name} here.`,
+    };
+  }
+
+  if (/how much|how many|quantity|amount/.test(lower) && /(oil|ghee|butter)/.test(lower) && isPrepOnlyStep(currentStep)) {
+    return {
+      answer: "This step is just prep, so you do not need to add oil yet. Add the oil when the pan is heated in a later step.",
+    };
+  }
+
+  return {
+    answer: currentStep?.instruction
+      ? `For this step, ${currentStep.instruction.split(".")[0].trim()}.`
+      : "Keep the heat steady, make one small adjustment at a time, and watch the texture closely.",
+  };
+}
+
+export async function answerRecipeQuestion({ question, recipe, previousMessages = [] }) {
+  if (!openai) {
+    return answerRecipeQuestionFallback({ question, recipe, previousMessages });
+  }
+
+  const resolvedReference = resolveRecipeReference(question, recipe, previousMessages);
   const completion = await openai.chat.completions.create({
     model,
     temperature: 0.2,
@@ -228,11 +403,11 @@ export async function answerRecipeQuestion({ question, recipe }) {
       {
         role: "system",
         content:
-          "You answer only recipe-related questions. If question is unrelated, reply exactly: I can only help with questions related to this recipe.",
+          "You are SmartChefAI's friendly chef assistant for a live cooking session. You will receive the recipe name, the current step, the ingredient list with quantities, recent conversation, and the user's exact question. Answer the exact question first. Do not repeat the full step unless the user asks for it. Be specific with quantities, timings, heat, and rescue actions when the recipe context includes them. Keep the reply short and practical, usually 1 to 3 sentences. Resolve vague words like it, this, that, or them from the current step or recent conversation before answering. Never suggest unsafe actions such as touching hot oil, tasting undercooked meat, or leaving heat unattended. If the question is unrelated to this recipe, reply exactly: I can only help with questions related to this recipe.",
       },
       {
         role: "user",
-        content: JSON.stringify({ question, recipe }),
+        content: JSON.stringify({ question, resolvedReference, previousMessages, recipe }),
       },
     ],
   });
@@ -240,63 +415,85 @@ export async function answerRecipeQuestion({ question, recipe }) {
   return {
     answer:
       completion.choices?.[0]?.message?.content?.trim() ||
-      "I can only help with questions related to this recipe.",
+      answerRecipeQuestionFallback({ question, recipe, previousMessages }).answer,
   };
 }
 
-function assistantFallbackTurn({ userUtterance, currentStepIndex = 0, totalSteps = 1, language = "English" }) {
-  const text = String(userUtterance || "").toLowerCase();
-  const lastStep = Math.max(totalSteps - 1, 0);
-  if (text.includes("stop")) {
-    return { reply: "Stopping hands-free cooking mode.", action: "stop", stepDelta: 0, language };
+function assistantFallbackTurn({ userUtterance, recipe = {}, currentStepIndex = 0, previousMessages = [] }) {
+  const currentStep = recipe?.steps?.[currentStepIndex] || recipe?.currentStep || null;
+  const quantityMatch = findQuantityForQuestion(userUtterance, recipe, currentStep);
+  const upcomingQuantityMatch = findUpcomingStepQuantity(userUtterance, recipe, currentStepIndex);
+  const fallbackAnswer = answerRecipeQuestionFallback({
+    question: userUtterance,
+    recipe: {
+      ...recipe,
+      currentStepIndex,
+      currentStep,
+    },
+    previousMessages,
+  }).answer;
+
+  if (/how much|how many|quantity|amount/.test(String(userUtterance || '').toLowerCase()) && quantityMatch?.quantity) {
+    return {
+      intent: "answer",
+      action: null,
+      parameters: { step: null },
+      response: `Use ${quantityMatch.quantity} of ${quantityMatch.name} for this step.`,
+    };
   }
-  if (text.includes("previous") || text.includes("back")) {
-    return { reply: "Sure, going to the previous step.", action: "previous", stepDelta: currentStepIndex > 0 ? -1 : 0, language };
+
+  if (/how much|how many|quantity|amount/.test(String(userUtterance || '').toLowerCase()) && /(oil|ghee|butter)/.test(String(userUtterance || '').toLowerCase()) && isPrepOnlyStep(currentStep)) {
+    return {
+      intent: "answer",
+      action: null,
+      parameters: { step: null },
+      response: "This step is only prep, so you do not need to add oil yet. Add the oil in the step where the pan is heated.",
+    };
   }
-  if (text.includes("next") || text.includes("done") || text.includes("finished") || text.includes("what's next") || text.includes("whats next")) {
-    return { reply: currentStepIndex < lastStep ? "Great, moving to the next step." : "Nice work. You are already on the final step.", action: "next", stepDelta: currentStepIndex < lastStep ? 1 : 0, language };
-  }
-  if (text.includes("repeat")) {
-    return { reply: "Sure, I will repeat this step.", action: "repeat", stepDelta: 0, language };
-  }
-  if (text.includes("pause")) {
-    return { reply: "Okay, pausing. Say resume when you are ready.", action: "pause", stepDelta: 0, language };
-  }
-  if (text.includes("resume")) {
-    return { reply: "Resuming now.", action: "resume", stepDelta: 0, language };
-  }
-  return { reply: "I can help with this recipe while we're cooking.", action: "none", stepDelta: 0, language };
+
+  return {
+    intent: "answer",
+    action: null,
+    parameters: { step: null },
+    response: fallbackAnswer || "I can help with this recipe while we're cooking.",
+  };
 }
 
 function cookingAssistantSystemPrompt() {
   return `
-You are SmartChefAI's hands-free cooking voice assistant.
-You are in a live cooking session. Be conversational, friendly, and concise.
-Never sound like a textbook narrator.
+You are a smart cooking assistant.
+
+You must:
+* Understand user intent
+* Decide if the user is asking a question or requesting an action
+* Return ONLY JSON in the specified format
 
 Rules:
-* Reply only for this recipe context.
-* If user asks unrelated question, reply exactly: "I can help with this recipe while we're cooking."
-* Understand intent from natural phrases:
-  - Next: "done", "finished", "what's next", "next"
-  - Previous: "previous", "go back"
-  - Repeat: "repeat", "say again"
-  - Pause: "pause", "wait"
-  - Resume: "resume", "continue"
-  - Stop: "stop cooking", "exit"
-* Return action field from:
-  "next","previous","repeat","pause","resume","stop","none"
-* stepDelta must be:
-  1 for next, -1 for previous, 0 otherwise.
-* Keep guidance practical for active cooking (times, heat, cues).
-* Respond in the requested language (English, Kannada, Hindi, Tamil, Telugu).
+* If user asks a question, set intent to "answer".
+* If user gives an instruction, set intent to "action".
+* Always include a helpful natural-language response.
+* Be precise, practical, and short.
+* Use recipe context including recipe name, current step, ingredients with quantities, and recent conversation.
+* Never suggest unsafe cooking actions.
+* If the user asks for navigation, use one of these actions:
+  - "go_to_step"
+  - "next_step"
+  - "previous_step"
+  - "stop"
+  - "repeat"
+* Use action null when intent is "answer".
+* If using "go_to_step", set parameters.step to the exact 1-based step number.
+* For all other actions, set parameters.step to null.
+* Do not include any text outside JSON.
 
-Return ONLY JSON:
+Return JSON in this exact shape:
 {
-  "reply": "string",
-  "action": "next|previous|repeat|pause|resume|stop|none",
-  "stepDelta": -1|0|1,
-  "language": "English|Kannada|Hindi|Tamil|Telugu"
+  "intent": "answer" | "action",
+  "action": "go_to_step" | "next_step" | "previous_step" | "stop" | "repeat" | null,
+  "parameters": {
+    "step": number | null
+  },
+  "response": "natural language reply for user"
 }
 `;
 }
@@ -307,22 +504,218 @@ export async function cookingAssistantTurn(input) {
     return fallback;
   }
 
-  const completion = await openai.chat.completions.create({
-    model,
-    temperature: 0.35,
-    messages: [
-      { role: "system", content: cookingAssistantSystemPrompt() },
-      { role: "user", content: JSON.stringify(input || {}) },
-    ],
-    response_format: { type: "json_object" },
-  });
+  try {
+    const completion = await openai.chat.completions.create({
+      model,
+      temperature: 0.25,
+      messages: [
+        { role: "system", content: cookingAssistantSystemPrompt() },
+        { role: "user", content: JSON.stringify(input || {}) },
+      ],
+      response_format: { type: "json_object" },
+    });
 
-  const content = completion.choices?.[0]?.message?.content || "{}";
-  const parsed = parseJson(content, {});
+    const content = completion.choices?.[0]?.message?.content || "{}";
+    const parsed = parseJson(content, null);
+    if (!parsed || typeof parsed !== "object") {
+      return fallback;
+    }
+
+    const normalizedIntent = parsed.intent === "action" ? "action" : "answer";
+    const allowedActions = ["go_to_step", "next_step", "previous_step", "stop", "repeat", null];
+    const normalizedAction = allowedActions.includes(parsed.action) ? parsed.action : null;
+    const normalizedStep = Number.isFinite(Number(parsed?.parameters?.step)) ? Number(parsed.parameters.step) : null;
+    const normalizedResponse = String(parsed.response || fallback.response || "I can help with this recipe while we're cooking.").trim();
+
+    return {
+      intent: normalizedIntent,
+      action: normalizedIntent === "action" ? normalizedAction : null,
+      parameters: {
+        step: normalizedAction === "go_to_step" && normalizedStep ? normalizedStep : null,
+      },
+      response: normalizedResponse,
+    };
+  } catch {
+    return fallback;
+  }
+}
+function extractIngredientNames(recipe = {}) {
+  return (recipe.ingredients || [])
+    .map((item) => String(item?.name || item || "").trim())
+    .filter(Boolean);
+}
+
+function findIngredientMatch(recipe = {}, text = "") {
+  const lower = String(text || "").toLowerCase();
+  return extractIngredientNames(recipe).find((name) => lower.includes(name.toLowerCase())) || null;
+}
+
+function pickSubstitutions(target = "") {
+  const normalized = String(target || "").toLowerCase().trim();
+  if (!normalized) return ["a similar ingredient"];
+  return SUBSTITUTION_MAP[normalized] || ["a similar ingredient", "a milder version of it"];
+}
+
+function replaceIngredientInText(text = "", target = "", replacement = "") {
+  if (!text || !target || !replacement) return text;
+  const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return text.replace(new RegExp(escaped, "gi"), replacement);
+}
+
+function normalizeAdaptedRecipe(recipe = {}) {
   return {
-    reply: String(parsed.reply || fallback.reply),
-    action: ["next", "previous", "repeat", "pause", "resume", "stop", "none"].includes(parsed.action) ? parsed.action : fallback.action,
-    stepDelta: Number(parsed.stepDelta) === 1 ? 1 : Number(parsed.stepDelta) === -1 ? -1 : 0,
-    language: parsed.language || input?.language || "English",
+    ...recipe,
+    steps: Array.isArray(recipe.steps) ? recipe.steps.map((step, idx) => normalizeStep(step, idx)) : [],
+    ingredients: Array.isArray(recipe.ingredients) ? recipe.ingredients : [],
+    substitutions: recipe.substitutions || {},
+    adaptationNotes: Array.isArray(recipe.adaptationNotes) ? recipe.adaptationNotes : [],
   };
 }
+
+function parseChangeRequest(changeRequest = "", recipe = {}, previousMessages = []) {
+  const raw = String(changeRequest || "").trim();
+  const lower = raw.toLowerCase();
+  const matchedIngredient = findIngredientMatch(recipe, lower);
+  const explicitSwap = lower.match(/replace\s+(.+?)\s+with\s+(.+?)(?:$|[,.])/i) || lower.match(/use\s+(.+?)\s+instead of\s+(.+?)(?:$|[,.])/i);
+  if (explicitSwap) {
+    const first = explicitSwap[1].trim();
+    const second = explicitSwap[2].trim();
+    const firstIsPronoun = /^(it|this|that|them)$/.test(first);
+    if (lower.includes("instead of")) {
+      return { targetIngredient: firstIsPronoun ? (matchedIngredient || second) : second, replacementIngredient: first, reason: raw };
+    }
+    return { targetIngredient: firstIsPronoun ? (matchedIngredient || first) : first, replacementIngredient: second, reason: raw };
+  }
+
+  const missingMatch = lower.match(/(?:don't have|dont have|no|without|out of)\s+([a-zA-Z ]+)/i);
+  const targetIngredient = matchedIngredient || missingMatch?.[1]?.trim() || resolveRecipeReference(raw, recipe, previousMessages) || extractIngredientNames(recipe)[0] || "the ingredient";
+  const substitution = pickSubstitutions(targetIngredient)[0];
+  return {
+    targetIngredient,
+    replacementIngredient: substitution,
+    reason: raw || `Need an alternative for ${targetIngredient}`,
+  };
+}
+
+function adaptRecipeFallback({ recipe, currentStepIndex = 0, changeRequest = "", previousMessages = [] }) {
+  const normalizedRecipe = normalizeAdaptedRecipe(recipe);
+  const { targetIngredient, replacementIngredient, reason } = parseChangeRequest(changeRequest, normalizedRecipe, previousMessages);
+  const target = String(targetIngredient || "").trim();
+  const replacement = String(replacementIngredient || "").trim();
+  const suggestions = Array.from(new Set([replacement, ...pickSubstitutions(target).filter((item) => item !== replacement)]));
+
+  const ingredients = normalizedRecipe.ingredients.map((item) => {
+    const name = String(item?.name || item || "");
+    if (!target || name.toLowerCase() !== target.toLowerCase()) return item;
+    return {
+      ...item,
+      name: replacement,
+      originalName: name,
+      quantity: item.quantity || "same amount as needed",
+      note: `Adjusted from ${name}`,
+    };
+  });
+
+  const steps = normalizedRecipe.steps.map((step, idx) => {
+    if (idx < currentStepIndex) return step;
+    const replacedIngredients = replaceIngredientInText(step.ingredients || step.ingredient || "", target, replacement);
+    const replacedInstruction = replaceIngredientInText(step.instruction || step.text || "", target, replacement);
+    return {
+      ...step,
+      ingredients: replacedIngredients,
+      ingredient: replacedIngredients,
+      instruction: replacedInstruction,
+      text: replacedInstruction,
+      lookFor: idx === currentStepIndex
+        ? `${step.lookFor || "Cooked texture"}. Since you switched ${target} to ${replacement}, taste a little earlier and adjust gently.`
+        : step.lookFor,
+    };
+  });
+
+  const substitutions = {
+    ...(normalizedRecipe.substitutions || {}),
+    [target]: suggestions,
+  };
+  const adaptationNotes = [
+    ...(normalizedRecipe.adaptationNotes || []),
+    {
+      atStep: currentStepIndex + 1,
+      targetIngredient: target,
+      replacementIngredient: replacement,
+      reason,
+      createdAt: new Date().toISOString(),
+    },
+  ];
+  const summary = `${replacement} will work in place of ${target}. I updated the remaining steps so you can keep going, and I would taste a little earlier than usual because the flavor may land faster.`;
+
+  return {
+    summary,
+    recipe: {
+      ...normalizedRecipe,
+      ingredients,
+      substitutions,
+      adaptationNotes,
+      steps,
+    },
+  };
+}
+
+export async function adaptRecipeInProgress(input = {}) {
+  const fallback = adaptRecipeFallback(input);
+  if (!openai) {
+    return fallback;
+  }
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model,
+      temperature: 0.3,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You adapt in-progress recipes for home cooks. Update only the remaining steps from the current step onward. Keep completed steps untouched. Make substitutions realistic, preserve quantities when possible, and keep the reply spoken-word friendly. Return only JSON with keys summary and recipe.",
+        },
+        {
+          role: "user",
+          content: JSON.stringify(input),
+        },
+      ],
+      response_format: { type: "json_object" },
+    });
+
+    const parsed = parseJson(completion.choices?.[0]?.message?.content || "{}", {});
+    if (!parsed?.recipe) {
+      return fallback;
+    }
+
+    return {
+      summary: String(parsed.summary || fallback.summary),
+      recipe: normalizeAdaptedRecipe({
+        ...fallback.recipe,
+        ...parsed.recipe,
+        substitutions: {
+          ...fallback.recipe.substitutions,
+          ...(parsed.recipe?.substitutions || {}),
+        },
+        adaptationNotes: [...(fallback.recipe.adaptationNotes || []), ...(parsed.recipe?.adaptationNotes || [])],
+      }),
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+

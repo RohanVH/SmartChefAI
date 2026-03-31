@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { foodFallbackIcon, getIngredientImageCandidates } from "../utils/helpers";
 
-export default function IngredientImage({ name, alt, className = "", loading = "lazy" }) {
+function IngredientImageComponent({ name, alt, className = "", loading = "lazy", sizes = "80px" }) {
   const candidates = useMemo(() => getIngredientImageCandidates(name), [name]);
   const [index, setIndex] = useState(0);
 
@@ -15,6 +15,8 @@ export default function IngredientImage({ name, alt, className = "", loading = "
       alt={alt || name || "ingredient"}
       className={className}
       loading={loading}
+      sizes={sizes}
+      decoding="async"
       onError={(e) => {
         if (index < candidates.length - 1) {
           setIndex((v) => v + 1);
@@ -27,3 +29,5 @@ export default function IngredientImage({ name, alt, className = "", loading = "
   );
 }
 
+const IngredientImage = memo(IngredientImageComponent);
+export default IngredientImage;

@@ -1,8 +1,11 @@
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY || "";
 
 function buildSearchTerm(query = "") {
-  const base = String(query || "").trim();
-  return base ? `${base} recipe cooking video` : "recipe cooking tutorial";
+  const base = String(query || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .slice(0, 180);
+  return base ? `${base} short cooking step tutorial` : "recipe cooking tutorial";
 }
 
 export async function findRecipeVideo(query) {
@@ -18,6 +21,7 @@ export async function findRecipeVideo(query) {
   url.searchParams.set("safeSearch", "strict");
   url.searchParams.set("maxResults", "5");
   url.searchParams.set("order", "relevance");
+  url.searchParams.set("videoDuration", "short");
 
   const response = await fetch(url.toString());
   if (!response.ok) return null;

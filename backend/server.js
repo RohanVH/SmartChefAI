@@ -29,7 +29,28 @@ app.use("/api/recipes", recipeRoutes);
 app.use("/api/ai", aiRoutes);
 app.use("/api/images", imageRoutes);
 
-app.listen(port, () => {
+const server = app.listen(port, () => {
   // eslint-disable-next-line no-console
   console.log(`SmartChefAI backend running on port ${port}`);
 });
+
+server.on("error", (error) => {
+  if (error.code === "EADDRINUSE") {
+    // eslint-disable-next-line no-console
+    console.error(`Port ${port} is already in use. Stop the existing SmartChefAI backend process and try again.`);
+    process.exit(1);
+  }
+
+  // eslint-disable-next-line no-console
+  console.error("SmartChefAI backend failed to start:", error);
+  process.exit(1);
+});
+
+function shutdown(signal) {
+  // eslint-disable-next-line no-console
+  console.log(`Received ${signal}. Shutting down SmartChefAI backend...`);
+  server.close(() => process.exit(0));
+}
+
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));

@@ -1,40 +1,36 @@
-import { getRecipeImageFromMealDB, getCuratedFoodImage, getRecipeImagesBatch } from "../services/imageService.js";
+import { buildRecipeImageQuery, getCuratedFoodImage, getRecipeImageFromMealDB, getRecipeImagesBatch, getUnsplashRecipeImage } from "../services/imageService.js";
 
 export async function getRecipeImageController(req, res) {
   const recipeName = String(req.query.name || "").trim();
-  
+
   if (!recipeName) {
     return res.json({ image: null, error: "Recipe name is required" });
   }
 
   try {
-    // First try TheMealDB API
+    const query = buildRecipeImageQuery(recipeName);
     let image = await getRecipeImageFromMealDB(recipeName);
-    
-    // If not found, try curated fallback
+    let source = "themealdb";
+
     if (!image) {
       image = getCuratedFoodImage(recipeName);
+      source = image ? "curated" : source;
     }
-    
+
     if (!image) {
-      return res.json({ 
-        image: null, 
-        message: "No image found for this recipe" 
-      });
+      image = getUnsplashRecipeImage(recipeName);
+      source = "unsplash";
     }
-    
-    return res.json({ image, recipeName });
-  } catch (error) {
-    return res.status(500).json({ 
-      image: null, 
-      error: "Failed to fetch recipe image" 
-    });
+
+    return res.json({ image, recipeName, query, source });
+  } catch {
+    return res.status(500).json({ image: null, error: "Failed to fetch recipe image" });
   }
 }
 
 export async function getRecipeImagesBatchController(req, res) {
   const { recipes } = req.body;
-  
+
   if (!Array.isArray(recipes) || recipes.length === 0) {
     return res.json({ images: [] });
   }
@@ -42,11 +38,7 @@ export async function getRecipeImagesBatchController(req, res) {
   try {
     const results = await getRecipeImagesBatch(recipes);
     return res.json({ images: results });
-  } catch (error) {
-    return res.status(500).json({ 
-      images: [], 
-      error: "Failed to fetch recipe images" 
-    });
+  } catch {
+    return res.status(500).json({ images: [], error: "Failed to fetch recipe images" });
   }
 }
-

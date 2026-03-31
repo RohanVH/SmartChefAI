@@ -42,6 +42,33 @@ const DISH_CATALOG = [
   "Rasam",
   "Aloo Gobi",
 ];
+const DISH_QUERY_ALIASES = new Map([
+  ["biriyani", "biryani"],
+  ["briyani", "biryani"],
+  ["biryani", "biryani"],
+  ["chiken", "chicken"],
+  ["chikn", "chicken"],
+  ["panir", "paneer"],
+  ["panner", "paneer"],
+  ["pulav", "pulao"],
+  ["pulaav", "pulao"],
+  ["curdrice", "curd rice"],
+  ["friedrice", "fried rice"],
+  ["chicken65", "chicken 65"],
+]);
+
+function normalizeDishQuery(value = "") {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) return "";
+
+  const compact = normalized.replace(/\s+/g, "");
+  return DISH_QUERY_ALIASES.get(compact) || DISH_QUERY_ALIASES.get(normalized) || normalized;
+}
 
 function normalizeIngredientName(name = "") {
   return name.trim().toLowerCase();
@@ -107,13 +134,13 @@ function levenshtein(a = "", b = "") {
 }
 
 function bestDishMatch(query = "") {
-  const q = query.trim().toLowerCase();
+  const q = normalizeDishQuery(query);
   if (!q) return null;
-  const direct = DISH_CATALOG.filter((dish) => dish.toLowerCase().includes(q));
+  const direct = DISH_CATALOG.filter((dish) => normalizeDishQuery(dish).includes(q));
   if (direct.length) return { best: direct[0], suggestions: direct.slice(0, 8), didYouMean: null };
 
   const ranked = DISH_CATALOG
-    .map((dish) => ({ dish, score: levenshtein(q, dish.toLowerCase()) }))
+    .map((dish) => ({ dish, score: levenshtein(q, normalizeDishQuery(dish)) }))
     .sort((a, b) => a.score - b.score);
   const best = ranked[0]?.dish || null;
   const didYouMean = ranked[0]?.score <= Math.max(2, Math.floor(q.length / 4)) ? best : null;
@@ -715,7 +742,8 @@ export async function searchRecipesController(req, res) {
 
   return res.json({
     recipes,
-    didYouMean: match?.didYouMean && match.didYouMean.toLowerCase() !== query.toLowerCase() ? match.didYouMean : null,
+    didYouMean:
+      match?.didYouMean && normalizeDishQuery(match.didYouMean) !== normalizeDishQuery(query) ? match.didYouMean : null,
   });
 }
 

@@ -1,4 +1,15 @@
 import api from "./api";
+import {
+  clearCookingSession,
+  getVideoCacheEntry,
+  loadChatHistory,
+  loadCookingSession,
+  loadGeneratedRecipes,
+  saveChatHistory,
+  saveCookingSession,
+  saveGeneratedRecipes,
+  setVideoCacheEntry,
+} from "../utils/recipeSession";
 
 const KEYS = {
   saved: "smartchefai_saved",
@@ -22,7 +33,6 @@ function setLocal(key, value) {
 function getImageCache() {
   try {
     const cache = JSON.parse(window.localStorage.getItem(KEYS.images) || "{}");
-    // Clean old entries (older than 24 hours)
     const now = Date.now();
     const cleaned = {};
     for (const [key, entry] of Object.entries(cache)) {
@@ -61,19 +71,32 @@ export const recipeService = {
   detectIngredients: async (imageBase64) => (await api.post("/ingredients/detect", { imageBase64 })).data,
   searchRecipeSuggestions: async (q) => (await api.get(`/recipes/search-suggestions?q=${encodeURIComponent(q)}`)).data,
   searchRecipes: async (payload) => (await api.post("/recipes/search", payload)).data,
-  getRecipeVideoGuide: async (q) => (await api.get(`/recipes/video-guide?q=${encodeURIComponent(q)}`)).data,
+  getRecipeVideoGuide: async (q) => {
+    const cacheKey = q.toLowerCase().trim();
+    const cached = getVideoCacheEntry(cacheKey);
+    if (cached) return cached;
+    const data = (await api.get(`/recipes/video-guide?q=${encodeURIComponent(q)}`)).data;
+    if (data?.video) setVideoCacheEntry(cacheKey, data);
+    return data;
+  },
   generateRecipes: async (payload) => (await api.post("/recipes/generate", payload)).data,
   surpriseMe: async (payload) => (await api.post("/recipes/surprise", payload)).data,
   leftoverSaver: async (payload) => (await api.post("/recipes/leftover-saver", payload)).data,
   recipeChat: async (payload) => (await api.post("/ai/chat", payload)).data,
   cookingAssistantTurn: async (payload) => (await api.post("/ai/assistant", payload)).data,
-  
-  // Recipe Image API with caching
+  adaptRecipe: async (payload) => (await api.post("/ai/adapt", payload)).data,
+  getGeneratedRecipes: () => loadGeneratedRecipes(),
+  saveGeneratedRecipes: (recipes) => saveGeneratedRecipes(recipes),
+  getChatHistory: (recipe) => loadChatHistory(recipe),
+  saveChatHistory: (recipe, messages) => saveChatHistory(recipe, messages),
+  getCookingSession: () => loadCookingSession(),
+  saveCookingSession: (session) => saveCookingSession(session),
+  clearCookingSession: () => clearCookingSession(),
+
   getRecipeImage: async (recipeName) => {
-    // Check local cache first
     const cached = getImageFromCache(recipeName);
     if (cached) return { image: cached, fromCache: true };
-    
+
     try {
       const result = await api.get(`/images/recipe-image?name=${encodeURIComponent(recipeName)}`);
       if (result.data?.image) {
@@ -85,12 +108,10 @@ export const recipeService = {
       return { image: null, fromCache: false };
     }
   },
-  
+
   getRecipeImages: async (recipeNames) => {
     const results = {};
     const toFetch = [];
-    
-    // Check cache first
     for (const name of recipeNames) {
       const cached = getImageFromCache(name);
       if (cached) {
@@ -99,8 +120,7 @@ export const recipeService = {
         toFetch.push(name);
       }
     }
-    
-    // Fetch uncached images
+
     if (toFetch.length > 0) {
       try {
         const result = await api.post("/images/recipe-images", { recipes: toFetch });
@@ -113,13 +133,13 @@ export const recipeService = {
           }
         }
       } catch {
-        // Ignore errors, use fallback
+        // ignore
       }
     }
-    
+
     return results;
   },
-  
+
   saveRecipe: async (recipe) => {
     try {
       const result = { ...(await api.post("/recipes/save", { recipe })).data, source: "remote" };

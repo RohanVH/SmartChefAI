@@ -1,19 +1,23 @@
 export default function Footer() {
   return (
-    <footer className="mt-20 border-t border-slate-700/80 bg-slate-900/40 py-10">
-      <div className="mx-auto grid max-w-7xl gap-6 px-4 text-sm text-slate-400 md:grid-cols-3">
+    <footer className="mt-20 border-t border-slate-800/80 bg-slate-950/50 py-12">
+      <div className="mx-auto grid max-w-7xl gap-8 px-4 md:grid-cols-[1.2fr_0.9fr_0.9fr]">
         <div>
-          <p className="font-display text-lg text-slate-100">SmartChefAI</p>
-          <p className="mt-2">Cook amazing dishes with what you have.</p>
+          <p className="font-display text-2xl text-slate-100">SmartChefAI</p>
+          <p className="mt-3 max-w-md text-sm leading-7 text-slate-400">
+            A premium AI cooking assistant for ingredient discovery, guided recipes, conversational help, and step-aware kitchen support.
+          </p>
         </div>
         <div>
-          <p className="font-semibold text-slate-200">Product</p>
-          <p className="mt-2">AI Recipe Generator</p>
-          <p>Hands-Free Cooking Assistant</p>
+          <p className="text-xs uppercase tracking-[0.28em] text-sky-300">Platform</p>
+          <p className="mt-3 text-sm text-slate-300">AI Recipe Generator</p>
+          <p className="mt-2 text-sm text-slate-300">Live Ingredient Scanner</p>
+          <p className="mt-2 text-sm text-slate-300">Guided Cooking Mode</p>
         </div>
         <div className="md:text-right">
-          <p className="font-semibold text-slate-200">Built for modern kitchens</p>
-          <p className="mt-2">© {new Date().getFullYear()} SmartChefAI</p>
+          <p className="text-xs uppercase tracking-[0.28em] text-emerald-300">Kitchen Ready</p>
+          <p className="mt-3 text-sm text-slate-300">Responsive across mobile, tablet, and desktop.</p>
+          <p className="mt-2 text-sm text-slate-500">© {new Date().getFullYear()} SmartChefAI</p>
         </div>
       </div>
     </footer>

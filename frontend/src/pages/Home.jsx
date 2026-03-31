@@ -1,347 +1,246 @@
+import { motion, AnimatePresence } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
-import { motion } from "framer-motion";
+import { useNavigate } from "react-router-dom";
+import CuisineSelector from "../components/CuisineSelector";
 import IngredientInput from "../components/IngredientInput";
-import FoodImage from "../components/FoodImage";
 import RecipeCard from "../components/RecipeCard";
 import RecipeSearchBar from "../components/RecipeSearchBar";
-import RecipeViewer from "../components/RecipeViewer";
+import { SectionHeading } from "../components/SectionHeading";
 import { useIngredients } from "../hooks/useIngredients";
 import { useRecipes } from "../hooks/useRecipes";
-import { foodFallbackIcon } from "../utils/helpers";
+import { recipeService } from "../services/recipeService";
+import { getRecipeRouteId, saveActiveRecipe } from "../utils/recipeSession";
 
-const cuisines = ["Indian", "Italian", "Chinese", "Mexican", "Thai"];
-const indianRegions = ["Karnataka", "Kerala", "Tamil Nadu", "Andhra Pradesh", "Maharashtra", "Punjab"];
-const timeOptions = [5, 10, 20, 30];
-const popular = [
+const CUISINES = [
+  { value: "Indian", label: "Indian", icon: "🍛", description: "Regional masalas, layered gravies, and comfort-forward dishes." },
+  { value: "Italian", label: "Italian", icon: "🍝", description: "Herb-heavy, balanced, and weeknight-friendly plates." },
+  { value: "Chinese", label: "Chinese", icon: "🥢", description: "Fast wok cooking, aromatics, and savory finishes." },
+  { value: "Mexican", label: "Mexican", icon: "🌮", description: "Bold spices, citrus lift, and skillet comfort." },
+  { value: "Thai", label: "Thai", icon: "🥥", description: "Fragrant herbs, layered heat, and bright sauces." },
+];
+
+const HERO_SLIDES = [
   {
-    name: "pasta",
-    image: "https://images.unsplash.com/photo-1621996346565-e3dbc646d9a9?auto=format&fit=crop&w=1200&q=80",
-  },  
-  {
-    name: "biryani",
-    image: "https://images.unsplash.com/photo-1589302168068-964664d93dc0?q=80&w=1974&auto=format&fit=crop&w=1200&q=80",
+    title: "Real-time help while your pan is already hot",
+    description: "Ask for substitutions, timing cues, and rescue guidance without losing your flow.",
+    image: "https://www.themealdb.com/images/media/meals/utxqpt1511639216.jpg",
   },
   {
-    name: "grilled chicken",
-    image: "https://images.unsplash.com/photo-1598515214211-89d3c73ae83b?auto=format&fit=crop&w=1200&q=80",
+    title: "Turn ingredients into polished meal ideas",
+    description: "Generate chef-like recipes with smart substitutions and guided cooking support.",
+    image: "https://www.themealdb.com/images/media/meals/1520084413.jpg",
   },
   {
-    name: "fried rice",
-    image: "https://images.unsplash.com/photo-1603133872878-684f208fb84b?auto=format&fit=crop&w=1200&q=80",
-  },
-  {
-    name: "soup",
-    image: "https://images.unsplash.com/photo-1665594051407-7385d281ad76?q=80&w=686&auto=format&fit=crop&w=1200&q=80",
-  },
-  {
-    name: "paneer curry",
-    image: "https://images.unsplash.com/photo-1701579231378-3726490a407b?q=80&w=687&auto=format&fit=crop&w=1200&q=80",
+    title: "Cook with voice, visuals, and calm step guidance",
+    description: "Move through each step with immersive cooking mode, video support, and an AI chef by your side.",
+    image: "https://www.themealdb.com/images/media/meals/xqusqy1487348868.jpg",
   },
 ];
 
+const INDIAN_REGIONS = ["Karnataka", "Kerala", "Tamil Nadu", "Andhra Pradesh", "Maharashtra", "Punjab"];
+const TIME_OPTIONS = [10, 20, 30, 45, 60];
+const DIFFICULTY_OPTIONS = ["Easy", "Balanced", "Challenging"];
+const SPICE_OPTIONS = ["Mild", "Medium", "Hot"];
+const DIET_OPTIONS = ["Flexible", "Vegetarian", "Non-Vegetarian", "Eggetarian"];
+const SKILL_OPTIONS = ["Beginner", "Home Cook", "Advanced"];
+const TOOL_OPTIONS = ["Kadai", "Pressure Cooker", "Oven", "Air Fryer", "Mixer", "Tawa"];
+
 export default function Home() {
+  const navigate = useNavigate();
   const { ingredients, addIngredient, removeIngredient, setIngredients } = useIngredients();
   const { recipes, setRecipes, loadRecipes, loading, error } = useRecipes();
-  const [selectedRecipeId, setSelectedRecipeId] = useState(null);
   const [cuisine, setCuisine] = useState("Indian");
   const [regionalStyle, setRegionalStyle] = useState("Karnataka");
   const [maxTime, setMaxTime] = useState(20);
   const [language, setLanguage] = useState("English");
   const [instructionStyle, setInstructionStyle] = useState("Simple");
+  const [difficultyPreference, setDifficultyPreference] = useState("Balanced");
+  const [spiceLevel, setSpiceLevel] = useState("Medium");
+  const [dietPreference, setDietPreference] = useState("Flexible");
+  const [skillLevel, setSkillLevel] = useState("Home Cook");
+  const [availableTools, setAvailableTools] = useState(["Kadai", "Tawa"]);
   const [leftoverInput, setLeftoverInput] = useState("");
   const [searchHint, setSearchHint] = useState("");
+  const cookingSession = useMemo(() => recipeService.getCookingSession(), []);
 
   const payload = useMemo(
-    () => ({ ingredients, cuisine, regionalStyle: cuisine === "Indian" ? regionalStyle : null, maxTime, language, instructionStyle }),
-    [ingredients, cuisine, regionalStyle, maxTime, language, instructionStyle]
+    () => ({
+      ingredients,
+      cuisine,
+      regionalStyle: cuisine === "Indian" ? regionalStyle : null,
+      maxTime,
+      language,
+      instructionStyle,
+      difficultyPreference,
+      spiceLevel,
+      dietPreference,
+      skillLevel,
+      availableTools,
+    }),
+    [ingredients, cuisine, regionalStyle, maxTime, language, instructionStyle, difficultyPreference, spiceLevel, dietPreference, skillLevel, availableTools]
   );
 
-  useEffect(() => {
-    setSelectedRecipeId(recipes.length ? (recipes[0].id || recipes[0].name) : null);
-  }, [recipes]);
+  const openRecipe = (recipe) => {
+    saveActiveRecipe(recipe);
+    navigate(`/recipe/${getRecipeRouteId(recipe)}`, { state: { recipe } });
+  };
 
-  const selectedRecipe = useMemo(
-    () => recipes.find((recipe) => (recipe.id || recipe.name) === selectedRecipeId) || null,
-    [recipes, selectedRecipeId]
-  );
+  const resumeSession = () => {
+    if (!cookingSession?.recipe) return;
+    saveActiveRecipe(cookingSession.recipe);
+    navigate(`/recipe/${getRecipeRouteId(cookingSession.recipe)}`, { state: { recipe: cookingSession.recipe } });
+  };
+
+  const toggleTool = (tool) => {
+    setAvailableTools((prev) => prev.includes(tool) ? prev.filter((item) => item !== tool) : [...prev, tool]);
+  };
 
   return (
-    <main className="mx-auto max-w-7xl px-4 py-8">
-      <Hero
-        onStart={() => loadRecipes(payload, "generate")}
-        onScan={() => window.scrollTo({ top: 560, behavior: "smooth" })}
-      />
+    <main className="mx-auto max-w-7xl px-4 py-8 md:py-10">
+      <Hero ingredientsCount={ingredients.length} onGenerate={() => loadRecipes(payload, "generate")} generating={loading} />
+
+      {cookingSession?.recipe ? (
+        <section className="mt-6 glass-panel rounded-[1.8rem] p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-[0.28em] text-emerald-300">Resume Cooking</p>
+              <p className="mt-2 text-sm text-slate-300">Pick up {cookingSession.recipe.name} from step {Number(cookingSession.stepIndex || 0) + 1}.</p>
+            </div>
+            <button type="button" onClick={resumeSession} className="rounded-full bg-gradient-to-r from-emerald-400 to-sky-400 px-5 py-3 font-semibold text-slate-950 transition hover:brightness-110 active:scale-[0.98]">Resume Session</button>
+          </div>
+        </section>
+      ) : null}
 
       <section className="mt-10">
         <IngredientInput ingredients={ingredients} addIngredient={addIngredient} removeIngredient={removeIngredient} setIngredients={setIngredients} />
       </section>
 
-      <section className="mt-12">
-        <SectionTitle title="AI Features" subtitle="Smart tools designed for fast, confident home cooking." />
-        <div className="grid gap-4 md:grid-cols-3">
-          {[
-            { title: "Ingredient Intelligence", desc: "Turn random pantry items into complete, realistic recipes." },
-            { title: "Hands-Free Cooking", desc: "Voice-first cooking assistant that guides step-by-step in real time." },
-            { title: "Multi-Style Recipes", desc: "Get multiple regional and cuisine variations from one dish search." },
-          ].map((item) => (
-            <motion.div
-              key={item.title}
-              whileHover={{ y: -4 }}
-              className="rounded-2xl border border-slate-700 bg-slate-800/80 p-5 shadow-lg shadow-black/20"
-            >
-              <h3 className="font-display text-lg text-slate-100">{item.title}</h3>
-              <p className="mt-2 text-sm text-slate-300">{item.desc}</p>
-            </motion.div>
-          ))}
+      <section className="mt-12 glass-panel hero-glow rounded-[2rem] p-5 md:p-6">
+        <SectionHeading eyebrow="Cuisine Builder" title="Choose a cooking direction that matches your mood" subtitle="Select cuisine, timing, difficulty, spice profile, and tool setup before asking the AI chef to generate recipes." />
+        <div className="mt-6"><CuisineSelector options={CUISINES} value={cuisine} onChange={setCuisine} /></div>
+        <div className="mt-6 grid gap-4 lg:grid-cols-5">
+          <Selector label="Regional Style" value={regionalStyle} onChange={setRegionalStyle} options={INDIAN_REGIONS} disabled={cuisine !== "Indian"} />
+          <Selector label="Cook Time" value={String(maxTime)} onChange={(value) => setMaxTime(Number(value))} options={TIME_OPTIONS.map(String)} suffix=" min" />
+          <Selector label="Difficulty" value={difficultyPreference} onChange={setDifficultyPreference} options={DIFFICULTY_OPTIONS} />
+          <Selector label="Language" value={language} onChange={setLanguage} options={["English", "Hindi", "Kannada", "Tamil", "Telugu"]} />
+          <Selector label="Instruction Style" value={instructionStyle} onChange={setInstructionStyle} options={["Simple", "Standard"]} />
         </div>
-      </section>
-
-      <section className="mt-12">
-        <SectionTitle title="Recipe Discovery" subtitle="Search directly or generate from your ingredients." />
-        <RecipeSearchBar
-          cuisine={cuisine}
-          regionalStyle={regionalStyle}
-          onResults={(resultRecipes, didYouMean, searchText) => {
-            setSearchHint(
-              resultRecipes.length
-                ? didYouMean
-                  ? `Showing results for ${didYouMean}`
-                  : `Showing results for ${searchText}`
-                : "No recipes found for your search."
-            );
-            setRecipes(resultRecipes);
-            setSelectedRecipeId(resultRecipes.length ? (resultRecipes[0].id || resultRecipes[0].name) : null);
-          }}
-        />
-        {searchHint ? <p className="mt-2 text-center text-sm text-sky-300">{searchHint}</p> : null}
-
-        <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <Picker label="Cuisine" options={cuisines} value={cuisine} setValue={setCuisine} />
-          {cuisine === "Indian" ? <Picker label="Regional Style" options={indianRegions} value={regionalStyle} setValue={setRegionalStyle} /> : <div />}
-          <Picker label="Cooking Time" options={timeOptions.map((v) => `${v} minutes`)} value={`${maxTime} minutes`} setValue={(v) => setMaxTime(Number(v.split(" ")[0]))} />
-          <Picker label="Language" options={["English", "Kannada", "Hindi", "Tamil", "Telugu"]} value={language} setValue={setLanguage} />
+        <div className="mt-4 grid gap-4 lg:grid-cols-3">
+          <Selector label="Spice Level" value={spiceLevel} onChange={setSpiceLevel} options={SPICE_OPTIONS} />
+          <Selector label="Diet" value={dietPreference} onChange={setDietPreference} options={DIET_OPTIONS} />
+          <Selector label="Skill Level" value={skillLevel} onChange={setSkillLevel} options={SKILL_OPTIONS} />
         </div>
-
-        <div className="mt-4 grid gap-4 md:grid-cols-[1fr_auto_auto]">
-          <Picker label="Instruction Style" options={["Simple", "Standard"]} value={instructionStyle} setValue={setInstructionStyle} />
-          <motion.button
-            whileTap={{ scale: 0.98 }}
-            onClick={() => loadRecipes(payload, "generate")}
-            className="rounded-xl bg-gradient-to-r from-emerald-400 to-emerald-500 px-6 py-3 font-semibold text-slate-950 shadow-lg shadow-emerald-900/20 transition hover:brightness-110 disabled:opacity-50"
-            disabled={ingredients.length === 0 || loading}
-          >
-            {loading ? "Generating..." : "Generate Recipes"}
-          </motion.button>
-          <motion.button
-            whileTap={{ scale: 0.98 }}
-            onClick={() => loadRecipes(payload, "surprise")}
-            className="rounded-xl bg-gradient-to-r from-sky-400 to-sky-500 px-6 py-3 font-semibold text-slate-950 shadow-lg shadow-sky-900/20 transition hover:brightness-110"
-          >
-            Surprise Me
-          </motion.button>
-        </div>
-
-        <div className="mt-4 rounded-3xl border border-slate-700 bg-slate-800/70 p-4 shadow-xl shadow-black/20">
-          <h3 className="font-display text-lg text-slate-100">Leftover Saver</h3>
-          <div className="mt-2 flex gap-2">
-            <input
-              value={leftoverInput}
-              onChange={(e) => setLeftoverInput(e.target.value)}
-              placeholder="e.g., rice, egg"
-              className="flex-1 rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 text-slate-100"
-            />
-            <motion.button
-              whileTap={{ scale: 0.97 }}
-              onClick={() => {
-                loadRecipes(
-                  {
-                    leftovers: leftoverInput
-                      .split(",")
-                      .map((v) => v.trim())
-                      .filter(Boolean),
-                    cuisine,
-                    maxTime,
-                  },
-                  "leftover"
-                );
-              }}
-              className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:brightness-110"
-            >
-              Find Leftover Recipes
-            </motion.button>
-          </div>
-        </div>
-      </section>
-
-      <section className="mt-12">
-        <SectionTitle title="Popular Recipes" subtitle="Trending dishes users are cooking right now." />
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {popular.map((item) => (
-            <motion.div key={item.name} whileHover={{ y: -4 }} className="overflow-hidden rounded-3xl border border-slate-700 bg-slate-800/80">
-              <img
-                src={item.image}
-                alt={item.name}
-                className="h-40 w-full object-cover"
-                loading="lazy"
-                onError={(e) => {
-                  e.currentTarget.onerror = null;
-                  e.currentTarget.src = foodFallbackIcon(800, 600);
-                }}
-              />
-              <div className="p-4">
-                <p className="font-display text-lg text-slate-100">{item.name.replace(/\b\w/g, (c) => c.toUpperCase())}</p>
-                <p className="mt-1 text-sm text-slate-300">Community favorite • quick to make</p>
-              </div>
-            </motion.div>
-          ))}
-        </div>
-      </section>
-
-      <section className="mt-12">
-        <SectionTitle title="How It Works" subtitle="Three simple steps to your next meal." />
-        <div className="grid gap-4 md:grid-cols-3">
-          {[
-            "Add ingredients manually or scan with camera.",
-            "Generate or search recipes instantly.",
-            "Cook with guided steps and voice assistant.",
-          ].map((item, idx) => (
-            <motion.div
-              key={item}
-              initial={{ opacity: 0, y: 10 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ delay: idx * 0.08 }}
-              className="rounded-2xl border border-slate-700 bg-slate-800/80 p-5"
-            >
-              <p className="text-sm font-semibold text-emerald-300">Step {idx + 1}</p>
-              <p className="mt-2 text-sm text-slate-300">{item}</p>
-            </motion.div>
-          ))}
-        </div>
-      </section>
-
-      <section className="mt-12">
-        <SectionTitle title="Recipes" subtitle="Choose a recipe card to open full instructions." />
-        {loading ? (
-          <div className="space-y-4">
-            <p className="text-center text-sm text-sky-300">
-              SmartChefAI is generating your recipes
-              <span className="inline-block animate-pulse">...</span>
-            </p>
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {Array.from({ length: 6 }).map((_, idx) => (
-                <RecipeSkeleton key={idx} />
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {recipes.map((recipe, idx) => (
-              <RecipeCard
-                key={recipe.id || `${recipe.name}-${idx}`}
-                recipe={recipe}
-                cardIndex={idx}
-                onSelect={(next) => setSelectedRecipeId(next.id || next.name)}
-              />
+        <div className="mt-4 rounded-[1.6rem] border border-slate-700 bg-slate-950/75 p-4">
+          <p className="text-sm font-medium text-slate-200">Available tools</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {TOOL_OPTIONS.map((tool) => (
+              <button
+                key={tool}
+                type="button"
+                onClick={() => toggleTool(tool)}
+                className={`rounded-full px-4 py-2 text-sm transition active:scale-[0.98] ${availableTools.includes(tool) ? "bg-emerald-500 text-slate-950" : "border border-slate-700 bg-slate-900 text-slate-200 hover:border-sky-400"}`}
+              >
+                {tool}
+              </button>
             ))}
           </div>
-        )}
-        {error && <p className="mt-4 rounded-lg border border-rose-500/40 bg-rose-900/20 p-3 text-sm text-rose-200">{error}</p>}
+        </div>
+        <div className="mt-6 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div className="rounded-[1.5rem] border border-slate-700 bg-slate-950/70 px-4 py-4 text-sm text-slate-300 xl:max-w-3xl">SmartChefAI will use your ingredients, cuisine profile, spice comfort, skill level, and available tools to generate 6 to 8 realistic recipes with guided steps, substitutions, and cooking support.</div>
+          <div className="flex flex-wrap gap-3">
+            <motion.button type="button" whileTap={{ scale: 0.98 }} onClick={() => loadRecipes(payload, "generate")} className="rounded-full bg-gradient-to-r from-emerald-400 to-emerald-500 px-6 py-3 font-semibold text-slate-950 shadow-lg shadow-emerald-900/20 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60" disabled={!ingredients.length || loading}>{loading ? "Generating..." : "Generate Recipes"}</motion.button>
+            <motion.button type="button" whileTap={{ scale: 0.98 }} onClick={() => loadRecipes(payload, "surprise")} className="rounded-full bg-gradient-to-r from-sky-400 to-cyan-400 px-6 py-3 font-semibold text-slate-950 transition hover:brightness-110">Surprise Me</motion.button>
+          </div>
+        </div>
+        <div className="mt-6 rounded-[1.7rem] border border-slate-700 bg-slate-950/75 p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+            <div className="lg:max-w-xs"><p className="font-display text-lg text-slate-100">Leftover Saver</p><p className="mt-1 text-sm text-slate-400">Turn leftovers into useful suggestions before anything goes to waste.</p></div>
+            <input value={leftoverInput} onChange={(e) => setLeftoverInput(e.target.value)} placeholder="e.g. cooked rice, egg, spinach" className="min-w-0 flex-1 rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-slate-100 placeholder:text-slate-500" />
+            <button type="button" onClick={() => loadRecipes({ leftovers: leftoverInput.split(",").map((v) => v.trim()).filter(Boolean), cuisine, maxTime, difficultyPreference, spiceLevel, dietPreference, skillLevel, availableTools }, "leftover")} className="rounded-full border border-sky-400/50 px-5 py-3 font-semibold text-sky-200 transition hover:bg-sky-500/10 active:scale-[0.98]">Find Leftover Recipes</button>
+          </div>
+        </div>
       </section>
 
-      <section className="mt-10">
-        <RecipeViewer key={selectedRecipe?.id || selectedRecipe?.name || "empty"} recipe={selectedRecipe} language={language} />
+      <section className="mt-12">
+        <RecipeSearchBar cuisine={cuisine} regionalStyle={regionalStyle} onResults={(resultRecipes, didYouMean, searchText) => { setSearchHint(resultRecipes.length ? didYouMean ? `Showing results for ${didYouMean}` : `Showing results for ${searchText}` : "No recipes found for your search."); setRecipes(resultRecipes); }} />
+      </section>
+
+      <section className="mt-12">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <SectionHeading eyebrow="Recipe Results" title="Premium recipe recommendations, ready for guided cooking" subtitle="Open any card to view a rich recipe detail page with video guidance, AI assistance, and cooking mode." />
+          {searchHint ? <p className="text-sm text-sky-300">{searchHint}</p> : null}
+        </div>
+        {error ? <p className="mt-5 rounded-[1.6rem] border border-rose-500/30 bg-rose-500/10 px-5 py-4 text-sm text-rose-200">{error}</p> : null}
+        <div className="mt-6">
+          {loading ? <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">{Array.from({ length: 6 }).map((_, idx) => <RecipeSkeleton key={idx} />)}</div> : recipes.length ? <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">{recipes.map((recipe, idx) => <RecipeCard key={recipe.id || `${recipe.name}-${idx}`} recipe={recipe} cardIndex={idx} onOpen={openRecipe} />)}</div> : <EmptyState />}
+        </div>
       </section>
     </main>
   );
 }
 
-function Hero({ onStart, onScan }) {
+function Hero({ ingredientsCount, onGenerate, generating }) {
+  const [activeSlide, setActiveSlide] = useState(0);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setActiveSlide((prev) => (prev + 1) % HERO_SLIDES.length);
+    }, 4200);
+    return () => window.clearInterval(timer);
+  }, []);
+
   return (
-    <section className="relative overflow-hidden rounded-3xl border border-slate-700 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-8 shadow-2xl shadow-black/40">
-      <div className="pointer-events-none absolute -right-12 -top-20 h-52 w-52 rounded-full bg-emerald-500/20 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-14 left-8 h-44 w-44 rounded-full bg-sky-500/20 blur-3xl" />
-      <div className="grid items-center gap-8 lg:grid-cols-2">
-        <div>
-          <h1 className="font-display text-4xl leading-tight text-slate-100 md:text-5xl">Cook Amazing Dishes With What You Have</h1>
-          <p className="mt-4 max-w-xl text-slate-300">
-            SmartChefAI analyzes your ingredients and generates delicious recipes instantly.
-          </p>
-          <div className="mt-6 flex flex-wrap gap-3">
-            <motion.button whileTap={{ scale: 0.98 }} onClick={onStart} className="rounded-xl bg-gradient-to-r from-emerald-400 to-emerald-500 px-5 py-3 font-semibold text-slate-950 shadow-lg shadow-emerald-900/20">
-              Start Cooking
-            </motion.button>
-            <motion.button whileTap={{ scale: 0.98 }} onClick={onScan} className="rounded-xl border border-sky-400/60 bg-slate-900 px-5 py-3 font-semibold text-sky-300">
-              Scan My Fridge
-            </motion.button>
+    <section className="hero-glow glass-panel relative overflow-hidden rounded-[2.4rem] px-6 py-10 md:px-10 md:py-14">
+      <div className="pointer-events-none absolute -right-20 top-[-3rem] h-64 w-64 rounded-full bg-emerald-500/18 blur-3xl" />
+      <div className="pointer-events-none absolute bottom-[-4rem] left-[20%] h-72 w-72 rounded-full bg-sky-500/14 blur-3xl" />
+      <div className="grid items-center gap-10 lg:grid-cols-[1fr_1fr]">
+        <div className="relative z-10">
+          <p className="text-xs uppercase tracking-[0.34em] text-emerald-300">AI Kitchen Companion</p>
+          <h1 className="mt-4 max-w-3xl font-display text-4xl leading-tight text-gradient md:text-6xl">From pantry chaos to confident cooking, in real time.</h1>
+          <p className="mt-5 max-w-2xl text-base leading-8 text-slate-300 md:text-lg">Generate chef-like recipes from the ingredients you already have, get contextual help while cooking, and follow step-guided video support that feels purpose-built for your kitchen.</p>
+          <div className="mt-7 flex flex-wrap gap-3">
+            <button type="button" onClick={onGenerate} className="rounded-full bg-gradient-to-r from-emerald-400 to-sky-400 px-6 py-3 font-semibold text-slate-950 transition hover:brightness-110 active:scale-[0.98]">{generating ? "Generating..." : "Start AI Cooking"}</button>
+            <div className="rounded-full border border-slate-700 bg-slate-900/60 px-5 py-3 text-sm text-slate-200">{ingredientsCount} ingredient{ingredientsCount === 1 ? "" : "s"} ready</div>
           </div>
         </div>
-        <div className="relative hidden min-h-[280px] lg:block">
-          {[
-            { q: "pasta bowl", cls: "left-4 top-2 w-44" },
-            { q: "grilled chicken", cls: "right-10 top-10 w-52" },
-            { q: "fresh salad", cls: "left-24 bottom-6 w-48" },
-          ].map((item, idx) => (
-            <motion.div
-              key={item.q}
-              className={`absolute rounded-2xl border border-slate-700 shadow-xl ${item.cls}`}
-              animate={{ y: [0, -10, 0] }}
-              transition={{ duration: 3 + idx, repeat: Infinity, ease: "easeInOut" }}
-            >
-              <FoodImage
-                query={item.q}
-                seed={`hero-${idx}-${item.q}`}
-                alt={item.q}
-                className="h-36 w-full rounded-2xl object-cover"
-                loading="lazy"
-              />
-            </motion.div>
-          ))}
+
+        <div className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-slate-950/60 shadow-[0_30px_80px_rgba(15,23,42,0.55)]">
+          <div className="relative aspect-[4/3] overflow-hidden">
+            <AnimatePresence mode="wait">
+              <motion.div key={activeSlide} initial={{ opacity: 0, scale: 1.04 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }} transition={{ duration: 0.6 }} className="absolute inset-0">
+                <img src={HERO_SLIDES[activeSlide].image} alt={HERO_SLIDES[activeSlide].title} className="h-full w-full object-cover" loading="eager" />
+                <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/20 to-transparent" />
+                <div className="absolute inset-x-0 bottom-0 p-6">
+                  <p className="text-xs uppercase tracking-[0.28em] text-emerald-300">Featured Experience</p>
+                  <h2 className="mt-3 max-w-lg font-display text-3xl leading-tight text-white">{HERO_SLIDES[activeSlide].title}</h2>
+                  <p className="mt-3 max-w-md text-sm leading-6 text-slate-200">{HERO_SLIDES[activeSlide].description}</p>
+                  <button type="button" onClick={onGenerate} className="mt-5 rounded-full border border-white/15 bg-white/10 px-5 py-3 text-sm font-semibold text-white backdrop-blur transition hover:bg-white/16 active:scale-[0.98]">Create Recipes Now</button>
+                </div>
+              </motion.div>
+            </AnimatePresence>
+          </div>
+          <div className="flex items-center justify-between gap-4 border-t border-white/10 bg-slate-950/80 px-5 py-4 backdrop-blur">
+            <div className="flex gap-2">
+              {HERO_SLIDES.map((slide, idx) => (
+                <button key={slide.title} type="button" aria-label={`Go to slide ${idx + 1}`} onClick={() => setActiveSlide(idx)} className={`h-2.5 rounded-full transition ${activeSlide === idx ? "w-10 bg-emerald-400" : "w-2.5 bg-slate-600"}`} />
+              ))}
+            </div>
+            {/* <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Auto-updating hero carousel</p> */}
+          </div>
         </div>
       </div>
     </section>
   );
 }
 
-function SectionTitle({ title, subtitle }) {
-  return (
-    <div className="mb-4">
-      <h2 className="font-display text-2xl text-slate-100">{title}</h2>
-      <p className="mt-1 text-sm text-slate-400">{subtitle}</p>
-    </div>
-  );
+function Selector({ label, value, onChange, options, suffix = "", disabled = false }) {
+  return <label className={`rounded-[1.5rem] border border-slate-700 bg-slate-950/70 p-4 ${disabled ? "opacity-60" : ""}`}><span className="mb-2 block text-sm font-medium text-slate-300">{label}</span><select value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled} className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-3 text-slate-100">{options.map((option) => <option key={option} value={option}>{option}{suffix}</option>)}</select></label>;
 }
 
 function RecipeSkeleton() {
-  return (
-    <div className="animate-pulse overflow-hidden rounded-3xl border border-slate-700 bg-slate-800/80">
-      <div className="h-36 w-full bg-slate-700" />
-      <div className="space-y-2 p-4">
-        <div className="h-4 w-2/3 rounded bg-slate-700" />
-        <div className="h-3 w-1/2 rounded bg-slate-700" />
-        <div className="h-3 w-1/3 rounded bg-slate-700" />
-      </div>
-    </div>
-  );
+  return <div className="overflow-hidden rounded-[1.85rem] border border-slate-700 bg-slate-900/70"><div className="h-52 animate-pulse bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900" /><div className="space-y-3 p-5"><div className="h-5 w-2/3 animate-pulse rounded bg-slate-800" /><div className="h-4 w-full animate-pulse rounded bg-slate-800" /><div className="h-4 w-4/5 animate-pulse rounded bg-slate-800" /><div className="flex gap-2"><div className="h-8 w-24 animate-pulse rounded-full bg-slate-800" /><div className="h-8 w-24 animate-pulse rounded-full bg-slate-800" /></div></div></div>;
 }
 
-function Picker({ label, options, value, setValue }) {
-  return (
-    <div className="rounded-3xl border border-slate-700 bg-slate-800/70 p-3 shadow-xl shadow-black/20">
-      <label className="mb-2 block text-sm text-slate-300">{label}</label>
-      <div className="flex flex-wrap gap-2">
-        {options.map((option) => (
-          <button
-            key={option}
-            onClick={() => setValue(option)}
-            className={`rounded-lg px-3 py-2 text-sm transition ${
-              value === option ? "bg-emerald-500 text-slate-950" : "bg-slate-900 text-slate-300 hover:bg-slate-700"
-            }`}
-          >
-            {option}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
+function EmptyState() {
+  return <div className="glass-panel rounded-[2rem] px-6 py-10 text-center"><p className="text-xs uppercase tracking-[0.32em] text-sky-300">Awaiting Recipes</p><h3 className="mt-3 font-display text-3xl text-slate-100">Your next dish starts here</h3><p className="mx-auto mt-3 max-w-2xl text-slate-300">Add ingredients, scan your kitchen, or search for a dish to generate a curated set of AI-assisted cooking ideas.</p></div>;
 }
