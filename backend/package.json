@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "node --watch server.js",
-    "start": "node server"
+    "start": "node server",
+    "vercel-start":"node server.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
