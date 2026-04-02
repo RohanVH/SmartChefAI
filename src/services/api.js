@@ -8,8 +8,14 @@ export function getApiBaseUrl() {
 
 export function getApiErrorMessage(error, fallback = "Something went wrong. Please try again.") {
   if (axios.isAxiosError(error)) {
-    const serverMessage = error.response?.data?.error || error.response?.data?.message;
-    if (serverMessage) return serverMessage;
+    const rawError = error.response?.data?.error;
+    const serverMessage =
+      typeof rawError === "string"
+        ? rawError
+        : rawError && typeof rawError === "object" && "message" in rawError
+          ? rawError.message
+          : error.response?.data?.message;
+    if (typeof serverMessage === "string" && serverMessage) return serverMessage;
     if (error.code === "ECONNABORTED") return "The request took too long. Please try again.";
     if (!error.response) return "Unable to reach SmartChefAI right now. Please try again.";
   }
@@ -42,4 +48,5 @@ api.interceptors.response.use(
 );
 
 export default api;
+
 
