@@ -6,6 +6,7 @@
     },
     {
       "src": "/(.*)",
+      "methods": ["GET", "HEAD"],
       "dest": "/index.html"
     }
   ]
