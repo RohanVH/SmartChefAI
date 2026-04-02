@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api";
+const API_BASE_URL = "/api";
 
 export function getApiBaseUrl() {
   return API_BASE_URL;
@@ -11,7 +11,7 @@ export function getApiErrorMessage(error, fallback = "Something went wrong. Plea
     const serverMessage = error.response?.data?.error || error.response?.data?.message;
     if (serverMessage) return serverMessage;
     if (error.code === "ECONNABORTED") return "The request took too long. Please try again.";
-    if (!error.response) return "Unable to reach SmartChefAI right now. Check that the backend is running.";
+    if (!error.response) return "Unable to reach SmartChefAI right now. Please try again.";
   }
 
   if (error instanceof Error && error.message) return error.message;
@@ -42,3 +42,4 @@ api.interceptors.response.use(
 );
 
 export default api;
+
