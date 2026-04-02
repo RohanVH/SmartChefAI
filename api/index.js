@@ -96,6 +96,17 @@ function apiHealth(res) {
   });
 }
 
+function normalizeSearchRequest(req) {
+  const queryText = String(req.body?.query || req.query?.query || req.query?.q || "").trim();
+  return {
+    ...req.body,
+    query: queryText,
+    cuisine: req.body?.cuisine || req.query?.cuisine || "Indian",
+    regionalStyle: req.body?.regionalStyle || req.query?.regionalStyle || null,
+    maxTime: req.body?.maxTime || req.query?.maxTime,
+  };
+}
+
 async function handleRecipesIndex(_req, res) {
   return res.status(200).json({
     success: true,
@@ -186,7 +197,8 @@ export default async function handler(req, res) {
       return runController(req, res, searchRecipeSuggestionsController);
     }
 
-    if (pathname === "/api/recipes/search" && method === "POST") {
+    if (pathname === "/api/recipes/search" && (method === "POST" || method === "GET")) {
+      req.body = normalizeSearchRequest(req);
       return runController(req, res, searchRecipesController);
     }
 
