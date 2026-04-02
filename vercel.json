@@ -2,11 +2,11 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "routes": [
     {
-      "handle": "filesystem"
+      "src": "^/api/(.*)",
+      "dest": "/api/index.js"
     },
     {
       "src": "/(.*)",
-      "methods": ["GET", "HEAD"],
       "dest": "/index.html"
     }
   ]
