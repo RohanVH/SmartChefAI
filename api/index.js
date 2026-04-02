@@ -22,11 +22,15 @@ import {
 } from "../lib/recipes.js";
 import { getPathname, getQuery, parseBody, verifyAuth } from "../lib/utils.js";
 
-function routeNotFound(res) {
-  return res.status(404).json({ success: false, error: "Route not found" });
+function ok(res, data) {
+  return res.status(200).json({ success: true, data });
 }
 
-function extractErrorMessage(payload, fallback = "Request failed") {
+function fail(res, error) {
+  return res.status(200).json({ success: false, error: typeof error === "string" ? error : error?.message || "Request failed" });
+}
+
+function extractMessage(payload, fallback = "Request failed") {
   if (typeof payload === "string" && payload) return payload;
   if (payload && typeof payload === "object") {
     if (typeof payload.error === "string" && payload.error) return payload.error;
@@ -39,9 +43,9 @@ function extractErrorMessage(payload, fallback = "Request failed") {
 }
 
 function createCaptureResponse() {
-  const capture = {
+  return {
     statusCode: 200,
-    payload: undefined,
+    payload: null,
     status(code) {
       this.statusCode = code;
       return this;
@@ -51,7 +55,6 @@ function createCaptureResponse() {
       return this;
     },
   };
-  return capture;
 }
 
 async function runController(req, res, controller) {
@@ -59,41 +62,14 @@ async function runController(req, res, controller) {
   await controller(req, captured);
 
   if (captured.payload && typeof captured.payload === "object" && typeof captured.payload.success === "boolean") {
-    return res.status(captured.statusCode).json(captured.payload);
+    return res.status(200).json(captured.payload);
   }
 
   if (captured.statusCode >= 400) {
-    return res.status(captured.statusCode).json({
-      success: false,
-      error: extractErrorMessage(captured.payload),
-    });
+    return fail(res, extractMessage(captured.payload));
   }
 
-  return res.status(200).json({
-    success: true,
-    data: captured.payload ?? null,
-  });
-}
-
-function apiHome(res) {
-  return res.status(200).json({
-    success: true,
-    data: {
-      service: "SmartChefAI API",
-      health: "/api/health",
-      apiBase: "/api",
-    },
-  });
-}
-
-function apiHealth(res) {
-  return res.status(200).json({
-    success: true,
-    data: {
-      status: "ok",
-      service: "SmartChefAI API",
-    },
-  });
+  return ok(res, captured.payload ?? null);
 }
 
 function normalizeSearchRequest(req) {
@@ -107,145 +83,166 @@ function normalizeSearchRequest(req) {
   };
 }
 
-async function handleRecipesIndex(_req, res) {
-  return res.status(200).json({
-    success: true,
-    data: {
-      recipes: [],
-      message: "SmartChefAI recipes endpoint is available.",
-    },
-  });
-}
-
-async function handleSurpriseRecipe(req, res) {
-  if (String(req.method || "GET").toUpperCase() === "GET") {
-    return res.status(200).json({
-      success: true,
-      data: {
-        title: "Surprise Recipe",
-        ingredients: [],
-        steps: [],
-      },
-    });
-  }
-
-  return runController(req, res, surpriseMeController);
+function normalizeRecipeGenerationRequest(req, fallback = {}) {
+  return {
+    ...fallback,
+    ...req.body,
+    ...req.query,
+  };
 }
 
 async function requireAuth(req, res) {
   const auth = await verifyAuth(req);
   if (!auth.ok) {
-    res.status(auth.status).json({ success: false, error: auth.error });
+    fail(res, auth.error);
     return false;
   }
   return true;
 }
 
-export default async function handler(req, res) {
-  const pathname = getPathname(req);
-  const method = String(req.method || "GET").toUpperCase();
+async function handleRecipesIndex(_req, res) {
+  return ok(res, {
+    recipes: [],
+    message: "SmartChefAI recipes endpoint is available.",
+  });
+}
 
-  req.query = getQuery(req);
-  req.body = await parseBody(req);
-
-  try {
-    if (pathname === "/api") {
-      return apiHome(res);
-    }
-
-    if (pathname === "/api/health") {
-      return apiHealth(res);
-    }
-
-    if (pathname === "/api/ai/chat" && method === "POST") {
-      return runController(req, res, recipeChatController);
-    }
-
-    if (pathname === "/api/ai/assistant" && method === "POST") {
-      return runController(req, res, cookingAssistantController);
-    }
-
-    if (pathname === "/api/ai/adapt" && method === "POST") {
-      return runController(req, res, adaptRecipeController);
-    }
-
-    if (pathname === "/api/ingredients/autocomplete" && method === "GET") {
-      return runController(req, res, autocompleteIngredients);
-    }
-
-    if (pathname === "/api/ingredients/detect" && method === "POST") {
-      return runController(req, res, detectIngredients);
-    }
-
-    if (pathname === "/api/recipes" && method === "GET") {
-      return handleRecipesIndex(req, res);
-    }
-
-    if (pathname === "/api/recipes/generate" && method === "POST") {
-      return runController(req, res, generateRecipeController);
-    }
-
-    if (pathname === "/api/recipes/surprise" && (method === "POST" || method === "GET")) {
-      return handleSurpriseRecipe(req, res);
-    }
-
-    if (pathname === "/api/recipes/leftover-saver" && method === "POST") {
-      return runController(req, res, leftoverSaverController);
-    }
-
-    if (pathname === "/api/recipes/search-suggestions" && method === "GET") {
-      return runController(req, res, searchRecipeSuggestionsController);
-    }
-
-    if (pathname === "/api/recipes/search" && (method === "POST" || method === "GET")) {
-      req.body = normalizeSearchRequest(req);
-      return runController(req, res, searchRecipesController);
-    }
-
-    if (pathname === "/api/recipes/video-guide" && method === "GET") {
-      return runController(req, res, recipeVideoGuideController);
-    }
-
-    if (pathname === "/api/recipes/save" && method === "POST") {
-      if (!(await requireAuth(req, res))) return;
-      return runController(req, res, saveRecipeController);
-    }
-
-    if (pathname === "/api/recipes/history" && method === "POST") {
-      if (!(await requireAuth(req, res))) return;
-      return runController(req, res, addHistoryController);
-    }
-
-    if (pathname === "/api/recipes/rate" && method === "POST") {
-      if (!(await requireAuth(req, res))) return;
-      return runController(req, res, rateRecipeController);
-    }
-
-    if (pathname === "/api/recipes/saved" && method === "GET") {
-      if (!(await requireAuth(req, res))) return;
-      return runController(req, res, getSavedRecipesController);
-    }
-
-    if (pathname === "/api/recipes/history" && method === "GET") {
-      if (!(await requireAuth(req, res))) return;
-      return runController(req, res, getHistoryController);
-    }
-
-    if (pathname === "/api/images/recipe-image" && method === "GET") {
-      return runController(req, res, getRecipeImageController);
-    }
-
-    if (pathname === "/api/images/recipe-images" && method === "POST") {
-      return runController(req, res, getRecipeImagesBatchController);
-    }
-
-    return routeNotFound(res);
-  } catch (error) {
-    console.error("SmartChefAI API error:", error);
-    return res.status(200).json({
-      success: false,
-      error: error instanceof Error ? error.message : "Internal server error",
-      data: [],
+async function handleSurpriseRecipe(req, res) {
+  const hasInput = Object.keys(req.body || {}).length > 0 || Object.keys(req.query || {}).length > 0;
+  if (!hasInput) {
+    return ok(res, {
+      title: "Surprise Recipe 🍲",
+      ingredients: [],
+      steps: [],
     });
+  }
+
+  req.body = normalizeRecipeGenerationRequest(req, { surprise: true });
+  return runController(req, res, surpriseMeController);
+}
+
+async function handleRecipesGenerate(req, res) {
+  req.body = normalizeRecipeGenerationRequest(req);
+  return runController(req, res, generateRecipeController);
+}
+
+async function handleRecipesLeftover(req, res) {
+  req.body = normalizeRecipeGenerationRequest(req);
+  return runController(req, res, leftoverSaverController);
+}
+
+async function handleSearch(req, res) {
+  req.body = normalizeSearchRequest(req);
+  return runController(req, res, searchRecipesController);
+}
+
+async function handleRequest(req, res) {
+  const pathname = getPathname(req);
+
+  if (pathname === "/api" || pathname === "/api/") {
+    return ok(res, {
+      service: "SmartChefAI API",
+      health: "/api/health",
+      apiBase: "/api",
+    });
+  }
+
+  if (pathname === "/api/health") {
+    return ok(res, {
+      status: "ok",
+      service: "SmartChefAI API",
+    });
+  }
+
+  if (pathname.includes("/api/recipes/search-suggestions")) {
+    return runController(req, res, searchRecipeSuggestionsController);
+  }
+
+  if (pathname.includes("/api/recipes/search")) {
+    return handleSearch(req, res);
+  }
+
+  if (pathname === "/api/recipes" || pathname === "/api/recipes/") {
+    return handleRecipesIndex(req, res);
+  }
+
+  if (pathname.includes("/api/recipes/surprise")) {
+    return handleSurpriseRecipe(req, res);
+  }
+
+  if (pathname.includes("/api/recipes/generate")) {
+    return handleRecipesGenerate(req, res);
+  }
+
+  if (pathname.includes("/api/recipes/leftover-saver")) {
+    return handleRecipesLeftover(req, res);
+  }
+
+  if (pathname.includes("/api/recipes/video-guide")) {
+    return runController(req, res, recipeVideoGuideController);
+  }
+
+  if (pathname.includes("/api/recipes/save")) {
+    if (!(await requireAuth(req, res))) return;
+    return runController(req, res, saveRecipeController);
+  }
+
+  if (pathname.includes("/api/recipes/history")) {
+    if (!(await requireAuth(req, res))) return;
+    const hasHistoryPayload = req.body && Object.keys(req.body).length > 0;
+    return hasHistoryPayload ? runController(req, res, addHistoryController) : runController(req, res, getHistoryController);
+  }
+
+  if (pathname.includes("/api/recipes/rate")) {
+    if (!(await requireAuth(req, res))) return;
+    return runController(req, res, rateRecipeController);
+  }
+
+  if (pathname.includes("/api/recipes/saved")) {
+    if (!(await requireAuth(req, res))) return;
+    return runController(req, res, getSavedRecipesController);
+  }
+
+  if (pathname.includes("/api/ai/chat")) {
+    return runController(req, res, recipeChatController);
+  }
+
+  if (pathname.includes("/api/ai/assistant")) {
+    return runController(req, res, cookingAssistantController);
+  }
+
+  if (pathname.includes("/api/ai/adapt")) {
+    return runController(req, res, adaptRecipeController);
+  }
+
+  if (pathname.includes("/api/ingredients/autocomplete")) {
+    return runController(req, res, autocompleteIngredients);
+  }
+
+  if (pathname.includes("/api/ingredients/detect")) {
+    return runController(req, res, detectIngredients);
+  }
+
+  if (pathname.includes("/api/images/recipe-image")) {
+    return runController(req, res, getRecipeImageController);
+  }
+
+  if (pathname.includes("/api/images/recipe-images")) {
+    return runController(req, res, getRecipeImagesBatchController);
+  }
+
+  return fail(res, "Route not found");
+}
+
+export default async function handler(req, res) {
+  try {
+    req.query = getQuery(req);
+    req.body = await parseBody(req);
+    req.body = typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
+
+    return await handleRequest(req, res);
+  } catch (err) {
+    console.error(err);
+    return fail(res, err?.message || "Internal server error");
   }
 }
