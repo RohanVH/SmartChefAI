@@ -6,7 +6,11 @@
       "dest": "/api/index.js"
     },
     {
+      "handle": "filesystem"
+    },
+    {
       "src": "/(.*)",
+      "methods": ["GET", "HEAD"],
       "dest": "/index.html"
     }
   ]
